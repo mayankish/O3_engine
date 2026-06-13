@@ -1,0 +1,129 @@
+name: OoO Issue Queue CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  simulate:
+    name: Compile and simulate all testbenches
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Show iverilog version
+        run: iverilog -V
+
+      - name: Compile and run RAT unit testbench
+        working-directory: ooo_issue_queue
+        run: |
+          iverilog -I rtl -I . \
+            rtl/register_alias_table.v tb/tb_rat.v \
+            -o sim/rat_tb.vvp
+          vvp sim/rat_tb.vvp | tee /tmp/rat.log
+          grep -q "RESULT: PASS" /tmp/rat.log
+
+      - name: Compile and run ROB unit testbench
+        working-directory: ooo_issue_queue
+        run: |
+          iverilog -I rtl -I . \
+            rtl/reorder_buffer.v tb/tb_reorder_buffer.v \
+            -o sim/rob_tb.vvp
+          vvp sim/rob_tb.vvp | tee /tmp/rob.log
+          grep -q "RESULT: PASS" /tmp/rob.log
+
+      - name: Compile and run RS unit testbench (depth=4)
+        working-directory: ooo_issue_queue
+        run: |
+          iverilog -DRS_DEPTH=4 -I rtl -I . \
+            rtl/reservation_station.v tb/tb_reservation_station.v \
+            -o sim/rs_tb.vvp
+          vvp sim/rs_tb.vvp | tee /tmp/rs.log
+          grep -q "RESULT: PASS" /tmp/rs.log
+
+      - name: Compile and run integration testbench
+        working-directory: ooo_issue_queue
+        run: |
+          iverilog -I rtl -I . \
+            rtl/register_alias_table.v \
+            rtl/reservation_station.v \
+            rtl/reorder_buffer.v \
+            rtl/integer_alu.v \
+            rtl/common_data_bus.v \
+            rtl/ooo_top.v \
+            tb/tb_ooo_top.v \
+            -o sim/ooo_tb.vvp
+          vvp sim/ooo_tb.vvp | tee /tmp/ooo.log
+          grep -q "RESULT: PASS" /tmp/ooo.log
+
+      - name: Random regression (gen_stimulus + golden_model)
+        working-directory: ooo_issue_queue
+        run: |
+          python3 tb/gen_stimulus.py --num 32 --seed 7 --hazard 0.3 > sim/instrs.txt
+          python3 tb/golden_model.py sim/instrs.txt
+          vvp sim/ooo_tb.vvp | tee /tmp/rand.log
+          grep -q "RESULT: PASS" /tmp/rand.log
+
+  lint:
+    name: Verilog lint (iverilog -t null)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Lint all RTL files
+        working-directory: ooo_issue_queue
+        run: |
+          for f in rtl/register_alias_table.v rtl/reservation_station.v \
+                   rtl/reorder_buffer.v rtl/integer_alu.v \
+                   rtl/common_data_bus.v rtl/ooo_top.v; do
+            echo "Linting $f ..."
+            iverilog -t null -I rtl -I . "$f"
+          done
+          echo "All RTL files lint clean."
+
+  synthesis:
+    name: Yosys synthesis (area check)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yosys
+        run: sudo apt-get update && sudo apt-get install -y yosys
+
+      - name: Synthesize RS at all three depths
+        working-directory: ooo_issue_queue
+        run: |
+          for DEPTH in 4 8 16; do
+            echo "=== RS_DEPTH=${DEPTH} ==="
+            yosys -p "
+              read_verilog -DRS_DEPTH=${DEPTH} -I rtl rtl/defines.vh rtl/reservation_station.v;
+              synth -top reservation_station -flatten;
+              stat;
+            " 2>&1 | grep -E "Number of|cells:"
+          done
+
+      - name: Synthesize full ooo_top
+        working-directory: ooo_issue_queue
+        run: |
+          yosys -p "
+            read_verilog -I rtl rtl/defines.vh;
+            read_verilog -I rtl rtl/common_data_bus.v;
+            read_verilog -I rtl rtl/integer_alu.v;
+            read_verilog -I rtl rtl/register_alias_table.v;
+            read_verilog -I rtl rtl/reservation_station.v;
+            read_verilog -I rtl rtl/reorder_buffer.v;
+            read_verilog -I rtl rtl/ooo_top.v;
+            synth -top ooo_top -flatten;
+            stat;
+          " 2>&1 | grep -E "Number of|cells:"

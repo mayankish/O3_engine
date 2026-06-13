@@ -1,0 +1,15 @@
+# synth_rs4.ys - Synthesize RS with RS_DEPTH=4
+# Usage: yosys synth_rs4.ys
+# Requires: yosys >= 0.23, abc in PATH
+
+read_verilog -DRS_DEPTH=4 -I ../rtl ../rtl/defines.vh
+read_verilog -DRS_DEPTH=4 -I ../rtl ../rtl/reservation_station.v
+
+synth -top reservation_station -flatten
+
+# Map to generic gate library for area estimation
+dfflibmap -liberty /dev/null
+abc -g cmos2
+
+stat -liberty /dev/null
+write_json ../synth/reports/area_rs4.json
