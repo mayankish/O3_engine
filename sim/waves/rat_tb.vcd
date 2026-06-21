@@ -1,5 +1,5 @@
 $date
-	Sat Jun 13 20:48:52 2026
+	Sun Jun 21 14:26:34 2026
 $end
 $version
 	Icarus Verilog
@@ -14,84 +14,105 @@ $var wire 32 # rs2_data [31:0] $end
 $var wire 4 $ rs1_tag [3:0] $end
 $var wire 1 % rs1_ready $end
 $var wire 32 & rs1_data [31:0] $end
-$var reg 32 ' cdb_data [31:0] $end
-$var reg 4 ( cdb_tag [3:0] $end
-$var reg 1 ) cdb_valid $end
-$var reg 1 * clk $end
-$var reg 32 + commit_data [31:0] $end
-$var reg 5 , commit_rd [4:0] $end
-$var reg 4 - commit_tag [3:0] $end
-$var reg 1 . commit_valid $end
-$var reg 1 / flush $end
-$var reg 5 0 rename_rd [4:0] $end
-$var reg 4 1 rename_tag [3:0] $end
-$var reg 1 2 rename_valid $end
-$var reg 5 3 rs1_addr [4:0] $end
-$var reg 5 4 rs2_addr [4:0] $end
-$var reg 1 5 rst_n $end
-$var integer 32 6 errors [31:0] $end
+$var parameter 32 ' AW $end
+$var parameter 32 ( CLK $end
+$var parameter 32 ) DW $end
+$var parameter 32 * NR $end
+$var parameter 32 + TW $end
+$var reg 32 , cdb_data [31:0] $end
+$var reg 4 - cdb_tag [3:0] $end
+$var reg 1 . cdb_valid $end
+$var reg 1 / clk $end
+$var reg 32 0 commit_data [31:0] $end
+$var reg 5 1 commit_rd [4:0] $end
+$var reg 4 2 commit_tag [3:0] $end
+$var reg 1 3 commit_valid $end
+$var reg 1 4 flush $end
+$var reg 5 5 rename_rd [4:0] $end
+$var reg 4 6 rename_tag [3:0] $end
+$var reg 1 7 rename_valid $end
+$var reg 5 8 rs1_addr [4:0] $end
+$var reg 5 9 rs2_addr [4:0] $end
+$var reg 1 : rst_n $end
+$var integer 32 ; errors [31:0] $end
 $scope module dut $end
-$var wire 32 7 cdb_data [31:0] $end
-$var wire 4 8 cdb_tag [3:0] $end
-$var wire 1 ) cdb_valid $end
-$var wire 1 * clk $end
-$var wire 32 9 commit_data [31:0] $end
-$var wire 5 : commit_rd [4:0] $end
-$var wire 4 ; commit_tag [3:0] $end
-$var wire 1 . commit_valid $end
-$var wire 1 / flush $end
-$var wire 5 < rename_rd [4:0] $end
-$var wire 4 = rename_tag [3:0] $end
-$var wire 1 2 rename_valid $end
-$var wire 5 > rs1_addr [4:0] $end
-$var wire 1 ? rs1_cdb_hit $end
+$var wire 32 < cdb_data [31:0] $end
+$var wire 4 = cdb_tag [3:0] $end
+$var wire 1 . cdb_valid $end
+$var wire 1 / clk $end
+$var wire 32 > commit_data [31:0] $end
+$var wire 5 ? commit_rd [4:0] $end
+$var wire 4 @ commit_tag [3:0] $end
+$var wire 1 3 commit_valid $end
+$var wire 1 4 flush $end
+$var wire 5 A rename_rd [4:0] $end
+$var wire 4 B rename_tag [3:0] $end
+$var wire 1 7 rename_valid $end
+$var wire 5 C rs1_addr [4:0] $end
+$var wire 1 D rs1_cdb_hit $end
 $var wire 1 % rs1_ready $end
-$var wire 4 @ rs1_tag [3:0] $end
-$var wire 5 A rs2_addr [4:0] $end
-$var wire 1 B rs2_cdb_hit $end
+$var wire 4 E rs1_tag [3:0] $end
+$var wire 5 F rs2_addr [4:0] $end
+$var wire 1 G rs2_cdb_hit $end
 $var wire 1 " rs2_ready $end
-$var wire 4 C rs2_tag [3:0] $end
-$var wire 1 5 rst_n $end
-$var wire 32 D rs2_data [31:0] $end
-$var wire 32 E rs1_data [31:0] $end
-$var integer 32 F r [31:0] $end
+$var wire 4 H rs2_tag [3:0] $end
+$var wire 1 : rst_n $end
+$var wire 32 I rs2_data [31:0] $end
+$var wire 32 J rs1_data [31:0] $end
+$var parameter 32 K AW $end
+$var parameter 32 L DW $end
+$var parameter 32 M NR $end
+$var parameter 32 N TW $end
+$var integer 32 O r [31:0] $end
 $upscope $end
 $upscope $end
 $enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+b100 N
+b100000 M
+b100000 L
+b101 K
+b100 +
+b100000 *
+b100000 )
+b1010 (
+b101 '
+$end
 #0
 $dumpvars
-bx F
+bx O
+bx J
+bx I
+bx H
+0G
+b0 F
 bx E
-bx D
-bx C
-0B
+0D
+b0 C
+b0 B
 b0 A
-bx @
-0?
+b0 @
+b0 ?
 b0 >
 b0 =
 b0 <
 b0 ;
-b0 :
+0:
 b0 9
 b0 8
-b0 7
+07
 b0 6
-05
-b0 4
-b0 3
-02
+b0 5
+04
+03
+b0 2
 b0 1
 b0 0
 0/
 0.
 b0 -
 b0 ,
-b0 +
-0*
-0)
-b0 (
-b0 '
 bx &
 x%
 bx $
@@ -103,150 +124,150 @@ $end
 1%
 1"
 b0 &
-b0 E
+b0 J
 b0 #
-b0 D
+b0 I
 b0 $
-b0 @
+b0 E
 b0 !
-b0 C
-b100000 F
-1*
+b0 H
+b100000 O
+1/
 #10000
-0*
+0/
 #15000
-b100000 F
-1*
+b100000 O
+1/
 #20000
-0*
+0/
 #25000
-b100000 F
-1*
+b100000 O
+1/
 #30000
-0*
+0/
 #35000
-15
-b100000 F
-1*
+1:
+b100000 O
+1/
 #36000
-b101 3
-b101 >
+b101 8
+b101 C
 #37000
-b11 1
-b11 =
-b101 0
-b101 <
-12
+b11 6
+b11 B
+b101 5
+b101 A
+17
 #40000
-0*
+0/
 #45000
 0%
 b11 $
-b11 @
-1*
+b11 E
+1/
 #46000
-02
+07
 #47000
-b111 1
-b111 =
-12
+b111 6
+b111 B
+17
 #50000
-0*
+0/
 #55000
 b111 $
-b111 @
-1*
+b111 E
+1/
 #56000
-b11 -
-b11 ;
-b1010101010101010 +
-b1010101010101010 9
-b101 ,
-b101 :
-1.
-02
+b11 2
+b11 @
+b1010101010101010 0
+b1010101010101010 >
+b101 1
+b101 ?
+13
+07
 #60000
-0*
+0/
 #65000
 b1010101010101010 &
-b1010101010101010 E
-1*
+b1010101010101010 J
+1/
 #66000
-0.
+03
 #68000
-b111 -
-b111 ;
-b1011101110111011 +
-b1011101110111011 9
-1.
+b111 2
+b111 @
+b1011101110111011 0
+b1011101110111011 >
+13
 #70000
-0*
+0/
 #75000
 1%
 b1011101110111011 &
-b1011101110111011 E
-1*
+b1011101110111011 J
+1/
 #76000
-0.
+03
 #78000
-b101 1
-b101 =
-b1010 0
-b1010 <
-12
+b101 6
+b101 B
+b1010 5
+b1010 A
+17
 #80000
-0*
+0/
 #85000
-1*
+1/
 #86000
-1?
+1D
 1%
 b110000001111111111101110 &
-b110000001111111111101110 E
+b110000001111111111101110 J
 b101 $
-b101 @
-b1010 3
-b1010 >
-b110000001111111111101110 '
-b110000001111111111101110 7
-b101 (
-b101 8
-1)
-02
+b101 E
+b1010 8
+b1010 C
+b110000001111111111101110 ,
+b110000001111111111101110 <
+b101 -
+b101 =
+1.
+07
 #87000
 0%
 b0 &
-b0 E
-0?
-0)
+b0 J
+0D
+0.
 #90000
-0*
+0/
 #95000
-1*
-#96000
-b1001 1
-b1001 =
-b1111 0
-b1111 <
-12
-#100000
-0*
-#105000
-1*
-#106000
 1/
-02
+#96000
+b1001 6
+b1001 B
+b1111 5
+b1111 A
+17
+#100000
+0/
+#105000
+1/
+#106000
+14
+07
 #110000
-0*
+0/
 #115000
 1%
-b100000 F
-1*
+b100000 O
+1/
 #116000
-0/
+04
 #117000
 b1001 $
-b1001 @
-b1111 3
-b1111 >
+b1001 E
+b1111 8
+b1111 C
 #118000
