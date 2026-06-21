@@ -1,6 +1,6 @@
 # Out-of-Order Issue Queue with Scoreboard (Tomasulo-style)
 
-**Tesla AI Hardware Portfolio — Project 3**
+
 
 A parameterized, synthesizable Verilog-2001 implementation of a Tomasulo-style
 out-of-order execution engine for a single integer functional unit. Demonstrates
