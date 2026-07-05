@@ -1,0 +1,16 @@
+workload,rs_depth,rob_depth,n,cycles,commits,ipc,deadlock,stall_rs,stall_rob,stall_both,file
+chain,4,16,8,20,8,0.4,False,1,0,0,sim/bench_instrs/chain_8.txt
+chain,4,16,16,36,16,0.4444,False,9,0,0,sim/bench_instrs/chain_16.txt
+chain,4,16,32,68,32,0.4706,False,25,0,0,sim/bench_instrs/chain_32.txt
+chain,4,16,64,132,64,0.4848,False,57,0,0,sim/bench_instrs/chain_64.txt
+chain,4,16,128,260,128,0.4923,False,121,0,0,sim/bench_instrs/chain_128.txt
+chain,8,16,8,20,8,0.4,False,0,0,0,sim/bench_instrs/chain_8.txt
+chain,8,16,16,36,16,0.4444,False,1,0,0,sim/bench_instrs/chain_16.txt
+chain,8,16,32,68,32,0.4706,False,17,0,0,sim/bench_instrs/chain_32.txt
+chain,8,16,64,132,64,0.4848,False,49,0,0,sim/bench_instrs/chain_64.txt
+chain,8,16,128,260,128,0.4923,False,113,0,0,sim/bench_instrs/chain_128.txt
+chain,16,16,8,20,8,0.4,False,0,0,0,sim/bench_instrs/chain_8.txt
+chain,16,16,16,36,16,0.4444,False,0,0,0,sim/bench_instrs/chain_16.txt
+chain,16,16,32,68,32,0.4706,False,0,4,0,sim/bench_instrs/chain_32.txt
+chain,16,16,64,132,64,0.4848,False,0,36,0,sim/bench_instrs/chain_64.txt
+chain,16,16,128,260,128,0.4923,False,0,100,0,sim/bench_instrs/chain_128.txt

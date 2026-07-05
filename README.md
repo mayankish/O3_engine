@@ -11,6 +11,7 @@ simulation with waveform debugging.
 [![Sim](https://img.shields.io/badge/Simulator-Icarus%20Verilog-informational)]()
 [![Synth](https://img.shields.io/badge/Synthesis-Yosys-orange)]()
 [![Status](https://img.shields.io/badge/Testbenches-4%2F4%20PASS-brightgreen)]()
+[![Known Issue](https://img.shields.io/badge/Known%20Issue-deadlock%20on%20mixed%20workloads-red)]()
 
 ## Architecture
 
@@ -49,12 +50,18 @@ simulation with waveform debugging.
 | `tb/tb_rat.v` | RAT unit testbench (5 tests) |
 | `tb/golden_model.py` | In-order reference model |
 | `tb/gen_stimulus.py` | Random instruction generator (RAW hazard knob) |
+| `tb/gen_indep.py` | Independent-burst generator (best-case IPC benchmark) |
+| `tb/gen_chain.py` | Pure RAW-chain generator (worst-case IPC benchmark) |
+| `tb/tb_bench_ipc.v` | Benchmark harness: IPC, stall breakdown, deadlock detection |
+| `tb/run_ipc_benchmark.py` | Orchestrates the full benchmark sweep, writes CSVs + plots |
 | `sim/run_sim.sh` | Compiles and runs all testbenches |
 | `sim/run_all_tests.sh` | Generates stimuli + regression against golden model |
+| `sim/bench_results/*.csv` | Raw benchmark output (IPC, stalls, deadlock rate) |
 | `synth/synth_rs{4,8,16}.ys` | Yosys synthesis scripts per RS depth |
 | `synth/constraints.sdc` | SDC timing constraints (500 MHz target) |
 | `docs/microarch_spec.md` | Full architecture description |
 | `docs/tradeoff_analysis.md` | RS depth vs. IPC vs. area trade-off |
+| `docs/known_issues.md` | RAT ready/commit conflation deadlock — root cause + fix direction |
 
 ## Simulation — proof of a passing run
 
@@ -87,12 +94,19 @@ bash sim/run_sim.sh
 bash sim/run_all_tests.sh --num 64 --seed 42 --hazard 0.4
 ```
 
-> **Known quirk:** the random-regression sub-test currently reports "0 random
-> instrs, all committed" — `gen_stimulus.py`'s output format doesn't match
-> what `golden_model.py` parses (a `WARNING: expected 4 tokens, got 9` is
-> printed per line), so it effectively exercises 0 instructions today. The
-> other four integration tests are unaffected and still pass; this is a
-> scripting mismatch on the to-do list, not an RTL bug.
+> **Update:** the random-regression parsing mismatch noted here previously
+> (`gen_stimulus.py`'s output didn't match what `$fscanf`/`golden_model.py`
+> expected, so the random-regression sub-test silently exercised 0
+> instructions) has been fixed — `gen_stimulus.py` now emits clean
+> `opcode rd rs1 rs2` lines with no header or inline comments. Fixing it
+> was not cosmetic: **TEST 5 above now genuinely drives random
+> instructions, and as a result `bash sim/run_all_tests.sh` will typically
+> hang until `tb_ooo_top.v`'s internal timeout (5,000,000 ns) instead of
+> printing PASS.** That is expected, not a regression from this fix — it is
+> a real functional deadlock in `ooo_top` that this fix uncovered, root
+> caused, and quantified. Full analysis in
+> [`docs/known_issues.md`](docs/known_issues.md), measured deadlock rate in
+> **Benchmarks** below.
 
 ## Waveform proof (GTKWave)
 
@@ -181,18 +195,74 @@ larger still, both well past what Graphviz's layout engine can render in
 reasonable time. The block-level diagram above is the practical, legible
 choice for a design this size.
 
-## Performance
+## Benchmarks
 
-Single-issue engine with a 2-cycle integer ALU:
+`tb/run_ipc_benchmark.py` compiles `tb_bench_ipc.v` once per `RS_DEPTH` (4/8/16)
+and drives three workload classes end to end, writing raw CSVs to
+`sim/bench_results/` and plots to `docs/images/`:
 
-* Steady-state IPC (independent stream, saturated RS): 1.0
-* Measured IPC (8 independent instructions, drain method): **0.47**
-* RAW chain of depth D: effective IPC ≈ 1/2 for D >> 1
+```bash
+python3 tb/run_ipc_benchmark.py
+```
 
-The RS hides ALU latency for independent instructions. Once `RS_DEPTH` grows
-past `ALU_LATENCY` (> 2), additional depth provides diminishing IPC returns
-for a single functional unit — see `docs/tradeoff_analysis.md` for the
-quantitative IPC-vs-area trade-off behind the 4/8/16 sweep above.
+### Best case vs. worst case IPC
+
+![IPC benchmark: independent burst and RAW chain](docs/images/ipc_benchmark.png)
+
+Independent bursts (`tb/gen_indep.py`, single destination register, zero
+cross-instruction RAW) climb from IPC 0.62 at 8 instructions to **0.98 at
+256 instructions** as fill/drain overhead gets amortized — consistent with
+the steady-state ceiling of 1.0 for this single-issue design. Pure RAW
+chains (`tb/gen_chain.py`) sit at **0.40 -> 0.49**, converging on the
+analytical `1/ALU_LATENCY = 0.5` limit as chain length grows, which is
+exactly what same-cycle CDB forwarding is supposed to buy back from a
+naive (no-forwarding) worst case of IPC 0.33. Both curves are identical
+across RS_DEPTH=4/8/16 — for these two workload shapes, RS depth doesn't
+matter, matching `docs/tradeoff_analysis.md`'s existing analysis (a single
+in-flight producer/consumer chain, or a single-register WAW stream, never
+pressures the RS regardless of its size).
+
+### Stall breakdown: where RS_DEPTH actually matters
+
+![RS-full stall rate under a pure RAW chain](docs/images/stall_breakdown.png)
+
+RS depth *does* matter once dispatch is allowed to race ahead of a slow
+dependency chain: under a 128-deep RAW chain, RS_DEPTH=4 spends **46.5%**
+of cycles stalled on `rs_full` (121/260 cycles), RS_DEPTH=8 spends 43.5%
+(113/260), and RS_DEPTH=16 spends **0%** on `rs_full` — but then spends 100
+of those 260 cycles stalled on `rob_full` instead, since RS_DEPTH==ROB_DEPTH
+here means the ROB fills at the same rate as the RS and becomes the new
+limiter. This is the real, measured version of the trade-off
+`docs/tradeoff_analysis.md` argued analytically.
+
+### Verification finding: a genuine deadlock on realistic workloads
+
+![Deadlock rate vs hazard rate](docs/images/deadlock_rate.png)
+
+The benchmark harness doubles as a random-regression stress test
+(`tb/gen_stimulus.py`, hazard rate 0.0-0.8, 3 seeds each, 60 instructions
+per stream). Result: **100% of streams deadlocked, at every hazard rate,
+at every RS_DEPTH** — including hazard=0.0, where register reuse is purely
+incidental rather than deliberately injected. A supplementary length sweep
+found the deadlock is already present at 5 instructions (1/3 seeds) and
+saturates to 3/3 by 30 instructions. Root cause: the RAT clears an
+architectural register's "in-flight" bit only at commit, not at
+completion, so a consumer that dispatches after its producer has broadcast
+on the CDB but before that producer has committed captures a tag that will
+never broadcast again, and its reservation-station entry stalls forever.
+Full analysis and suggested fix direction: **[`docs/known_issues.md`](docs/known_issues.md)**.
+
+Practically, this means the two clean IPC curves above are real but
+non-representative: the independent-burst and pure-chain workloads were
+both (unknowingly, until this benchmarking pass) constructed in a way that
+avoids the bug, while a realistic multi-register instruction mix reliably
+does not.
+
+Single-issue engine with a 2-cycle integer ALU, for reference:
+
+* Steady-state IPC (independent stream, saturated RS): 1.0 (approached at 0.98 measured)
+* RAW chain of depth D: effective IPC -> 0.5 for D >> 1 (0.49 measured at D=128)
+* General mixed workload: **deadlocks** in the current RTL — see above
 
 ## Design notes
 

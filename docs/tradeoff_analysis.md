@@ -18,22 +18,36 @@ With N RS entries buffering independent instructions, the pipeline fills quickly
 the CDB keeps the FU busy. The benefit of N>L diminishes: once N > L (N > 2 for
 our 2-cycle ALU), the RS can always shadow the ALU latency with independent work.
 
-Empirical from simulation (8 independent instructions, drain method):
+**Update — measured, not just an 8-instruction spot check.** The single-point
+"8 independent instructions, IPC=0.47" estimate below has been superseded by
+a full sweep in `tb/run_ipc_benchmark.py` (see the README's Benchmarks
+section and `sim/bench_results/`). Measured results:
 
-| RS_DEPTH | Observed IPC | Notes |
-|----------|-------------|-------|
-| 4        | 0.47        | 17 cycles for 8 instrs (fill+drain overhead visible) |
-| 8        | ~0.47       | Same for independent stream; RS never stalls |
-| 16       | ~0.47       | No gain for purely independent stream |
+| RS_DEPTH | Independent burst IPC (N=8 -> N=256) | Pure RAW chain IPC (N=8 -> N=128) |
+|----------|----------------------------------------|--------------------------------------|
+| 4        | 0.62 -> 0.98                            | 0.40 -> 0.49                          |
+| 8        | 0.62 -> 0.98                            | 0.40 -> 0.49                          |
+| 16       | 0.62 -> 0.98                            | 0.40 -> 0.49                          |
 
-For a workload with ILP (independent instructions interleaved with a long RAW chain),
-a deeper RS allows more instructions to remain in flight and hide the chain latency:
+Both curves are identical across RS_DEPTH, confirming the analytical claim
+below (a single-register WAW stream or a single dependency chain never
+pressures the RS, regardless of depth). Plots: `docs/images/ipc_benchmark.png`.
 
-| RS_DEPTH | RAW chain depth | Estimated IPC (mixed 50% independent) |
-|----------|-----------------|--------------------------------------|
-| 4        | 4               | ~0.55                                |
-| 8        | 8               | ~0.72                                |
-| 16       | 16              | ~0.85                                |
+Old single-point estimate (kept for context): 8 independent instructions,
+drain method, RS_DEPTH=4, IPC=0.47 (17 cycles for 8 instrs).
+
+**The "mixed 50% independent" table that used to be here has been removed.**
+It was an analytical estimate, never measured, and the benchmarking pass
+found that general mixed-register workloads do not produce a stable IPC at
+all in the current RTL — they deadlock. See
+[`docs/known_issues.md`](known_issues.md) and the README's Benchmarks
+section for the root cause (a RAT ready/commit conflation bug) and the
+measured deadlock rate (100% of 60-instruction streams across all hazard
+rates 0.0-0.8 and all RS_DEPTH values tested). The RS-depth-vs-ILP argument
+below is still the right analytical intuition for *why* a deeper RS should
+help a mixed workload — it just can't be validated empirically until that
+bug is fixed, since any workload that would exercise it currently hangs
+instead of completing.
 
 ## 3. Area Scaling (from Yosys synthesis)
 
