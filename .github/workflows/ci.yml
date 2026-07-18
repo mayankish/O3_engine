@@ -20,8 +20,10 @@ jobs:
       - name: Show iverilog version
         run: iverilog -V
 
+      - name: Create VCD output directory
+        run: mkdir -p sim/waves
+
       - name: Compile and run RAT unit testbench
-        working-directory: ooo_issue_queue
         run: |
           iverilog -I rtl -I . \
             rtl/register_alias_table.v tb/tb_rat.v \
@@ -30,7 +32,6 @@ jobs:
           grep -q "RESULT: PASS" /tmp/rat.log
 
       - name: Compile and run ROB unit testbench
-        working-directory: ooo_issue_queue
         run: |
           iverilog -I rtl -I . \
             rtl/reorder_buffer.v tb/tb_reorder_buffer.v \
@@ -39,7 +40,6 @@ jobs:
           grep -q "RESULT: PASS" /tmp/rob.log
 
       - name: Compile and run RS unit testbench (depth=4)
-        working-directory: ooo_issue_queue
         run: |
           iverilog -DRS_DEPTH=4 -I rtl -I . \
             rtl/reservation_station.v tb/tb_reservation_station.v \
@@ -48,7 +48,6 @@ jobs:
           grep -q "RESULT: PASS" /tmp/rs.log
 
       - name: Compile and run integration testbench
-        working-directory: ooo_issue_queue
         run: |
           iverilog -I rtl -I . \
             rtl/register_alias_table.v \
@@ -63,7 +62,6 @@ jobs:
           grep -q "RESULT: PASS" /tmp/ooo.log
 
       - name: Random regression (gen_stimulus + golden_model)
-        working-directory: ooo_issue_queue
         run: |
           python3 tb/gen_stimulus.py --num 32 --seed 7 --hazard 0.3 > sim/instrs.txt
           python3 tb/golden_model.py sim/instrs.txt
@@ -81,7 +79,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
       - name: Lint all RTL files
-        working-directory: ooo_issue_queue
         run: |
           for f in rtl/register_alias_table.v rtl/reservation_station.v \
                    rtl/reorder_buffer.v rtl/integer_alu.v \
@@ -102,7 +99,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y yosys
 
       - name: Synthesize RS at all three depths
-        working-directory: ooo_issue_queue
         run: |
           for DEPTH in 4 8 16; do
             echo "=== RS_DEPTH=${DEPTH} ==="
@@ -114,7 +110,6 @@ jobs:
           done
 
       - name: Synthesize full ooo_top
-        working-directory: ooo_issue_queue
         run: |
           yosys -p "
             read_verilog -I rtl rtl/defines.vh;
