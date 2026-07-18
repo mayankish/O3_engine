@@ -78,14 +78,25 @@ jobs:
       - name: Install iverilog
         run: sudo apt-get update && sudo apt-get install -y iverilog
 
-      - name: Lint all RTL files
+      - name: Lint leaf modules individually
         run: |
           for f in rtl/register_alias_table.v rtl/reservation_station.v \
                    rtl/reorder_buffer.v rtl/integer_alu.v \
-                   rtl/common_data_bus.v rtl/ooo_top.v; do
+                   rtl/common_data_bus.v; do
             echo "Linting $f ..."
             iverilog -t null -I rtl -I . "$f"
           done
+
+      - name: Lint ooo_top with all sub-modules
+        run: |
+          echo "Linting rtl/ooo_top.v (with all sub-modules) ..."
+          iverilog -t null -I rtl -I . \
+            rtl/register_alias_table.v \
+            rtl/reservation_station.v \
+            rtl/reorder_buffer.v \
+            rtl/integer_alu.v \
+            rtl/common_data_bus.v \
+            rtl/ooo_top.v
           echo "All RTL files lint clean."
 
   synthesis:
