@@ -4,6 +4,16 @@
 // Author      : Mayank
 // Description : 2-stage pipelined integer ALU supporting ADD/SUB/MUL/SHL/SHR.
 //               Issue-to-CDB-request latency = ALU_LATENCY = 2 cycles.
+//
+// Fix #2 — multi-FU CDB backpressure:
+//   Added cdb_req_grant input from the CDB arbiter.  When the ALU has a
+//   result (cdb_req_valid=1) but loses CDB arbitration (grant=0), both
+//   pipeline stages hold their state and fu_ready (wired externally from
+//   the RS's fu_ready port) goes low so the RS does not issue another
+//   instruction into a stalled pipeline.
+//   With NUM_FU=1 the CDB always grants fu0, so grant = cdb_req_valid and
+//   s2_stall = cdb_req_valid && !cdb_req_valid = 0 — no behavioural change.
+//
 // Parameters  : DW=32 (data width), TW=4 (tag width), OW=3 (opcode width)
 // ============================================================
 
@@ -28,7 +38,12 @@ module integer_alu #(
     // CDB request port (to common_data_bus)
     output reg            cdb_req_valid, // Result ready to broadcast
     output reg  [TW-1:0]  cdb_req_tag,   // Tag associated with result
-    output reg  [DW-1:0]  cdb_req_data   // Computed result
+    output reg  [DW-1:0]  cdb_req_data,  // Computed result
+
+    // [Fix #2] CDB grant feedback from arbiter
+    // When cdb_req_valid=1 and cdb_req_grant=0, both pipeline stages hold.
+    // With NUM_FU=1, grant = cdb_req_valid always, so stall never fires.
+    input  wire           cdb_req_grant  // CDB arbiter granted this FU this cycle
 );
 
 // ---- Stage-1 pipeline registers ------------------------------------
@@ -39,14 +54,11 @@ reg  [DW-1:0]  s1_src2;
 reg  [TW-1:0]  s1_tag;
 
 // ---- Stage-2 combinational compute ---------------------------------
-// Signed wrappers for arithmetic right behaviour
 wire signed [DW-1:0] s1_src1_s = $signed(s1_src1);
 wire signed [DW-1:0] s1_src2_s = $signed(s1_src2);
 
-// MUL: keep low 32 bits of 64-bit product (truncating multiply)
 wire [2*DW-1:0] mul_result = s1_src1_s * s1_src2_s;
 
-// Combinational result mux based on stage-1 opcode
 reg [DW-1:0] s2_result_c;
 always @(*) begin
     case (s1_opcode)
@@ -54,12 +66,18 @@ always @(*) begin
         `OP_SUB : s2_result_c = s1_src1 - s1_src2;
         `OP_MUL : s2_result_c = mul_result[DW-1:0];
         `OP_SHL : s2_result_c = s1_src1 << s1_src2[4:0];
-        `OP_SHR : s2_result_c = s1_src1_s >>> s1_src2[4:0]; // arithmetic shift
+        `OP_SHR : s2_result_c = s1_src1_s >>> s1_src2[4:0];
         default : s2_result_c = {DW{1'b0}};
     endcase
 end
 
-// ---- Stage-1: latch issue inputs -----------------------------------
+// ---- Stall signal --------------------------------------------------
+// Stall when stage-2 holds a result that lost CDB arbitration this cycle.
+// fu_ready in ooo_top is wired to !s2_stall so the RS cannot issue
+// another instruction into a backed-up pipeline.
+wire s2_stall = cdb_req_valid && !cdb_req_grant;
+
+// ---- Stage-1: latch issue inputs (hold on stall) -------------------
 always @(posedge clk) begin
     if (!rst_n || flush) begin
         s1_valid  <= 1'b0;
@@ -67,7 +85,8 @@ always @(posedge clk) begin
         s1_src1   <= {DW{1'b0}};
         s1_src2   <= {DW{1'b0}};
         s1_tag    <= {TW{1'b0}};
-    end else begin
+    end else if (!s2_stall) begin
+        // Advance normally; when stalled, hold stage-1 contents
         s1_valid  <= issue_valid;
         s1_opcode <= issue_opcode;
         s1_src1   <= issue_src1;
@@ -76,17 +95,19 @@ always @(posedge clk) begin
     end
 end
 
-// ---- Stage-2: register computed result  CDB request ---------------
+// ---- Stage-2: register computed result → CDB request (hold on stall) ---
 always @(posedge clk) begin
     if (!rst_n || flush) begin
         cdb_req_valid <= 1'b0;
         cdb_req_tag   <= {TW{1'b0}};
         cdb_req_data  <= {DW{1'b0}};
-    end else begin
+    end else if (!s2_stall) begin
+        // Advance: either no result pending, or it was granted last cycle
         cdb_req_valid <= s1_valid;
         cdb_req_tag   <= s1_tag;
         cdb_req_data  <= s2_result_c;
     end
+    // If s2_stall: hold cdb_req_valid/tag/data until grant arrives
 end
 
 endmodule

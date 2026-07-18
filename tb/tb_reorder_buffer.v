@@ -6,6 +6,11 @@
 // Tests     : 1) Allocate to full  2) Out-of-order complete, in-order commit
 //             3) Continuous throughput (alloc+commit same cycle)
 //             4) Flush clears ROB
+// Updated for Fix #1 (lk1/lk2 tag-lookup ports) and Fix #3 (alloc_fault,
+// commit_fault).  New ports are tied to safe defaults:
+//   alloc_fault = 0 (no instruction faults in these tests)
+//   lk1_tag     = 0, lk2_tag = 0 (lookup outputs unused here)
+//   commit_ack  = commit_valid && !commit_fault (matches ooo_top behaviour)
 // ============================================================
 
 module tb_reorder_buffer;
@@ -29,8 +34,13 @@ wire       commit_valid;
 wire [AW-1:0] commit_rd;
 wire [DW-1:0] commit_data;
 wire [TW-1:0] commit_tag;
+wire       commit_fault;  // [Fix #3] output — monitored but not expected to assert
 reg        commit_ack;
 wire       rob_empty;
+
+// [Fix #1] Tag-lookup outputs (driven to 0 input; outputs not checked in these tests)
+wire       lk1_complete, lk2_complete;
+wire [DW-1:0] lk1_data, lk2_data;
 
 integer errors;
 
@@ -39,19 +49,26 @@ reorder_buffer #(
 ) dut (
     .clk(clk), .rst_n(rst_n), .flush(flush),
     .alloc_valid(alloc_valid), .alloc_rd(alloc_rd), .alloc_opcode(alloc_opcode),
+    .alloc_fault(1'b0),          // [Fix #3] no faults in these tests
     .alloc_tag(alloc_tag), .rob_full(rob_full),
     .complete_valid(complete_valid), .complete_tag(complete_tag),
     .complete_data(complete_data),
     .commit_valid(commit_valid), .commit_rd(commit_rd),
     .commit_data(commit_data), .commit_tag(commit_tag),
-    .commit_ack(commit_ack), .rob_empty(rob_empty)
+    .commit_fault(commit_fault), // [Fix #3] monitored output
+    .commit_ack(commit_ack), .rob_empty(rob_empty),
+    // [Fix #1] tag-lookup ports — inputs tied to 0, outputs captured but unused
+    .lk1_tag({TW{1'b0}}), .lk1_complete(lk1_complete), .lk1_data(lk1_data),
+    .lk2_tag({TW{1'b0}}), .lk2_complete(lk2_complete), .lk2_data(lk2_data)
 );
 
 initial clk = 0;
 always #(CLK/2) clk = ~clk;
 
-// Auto-commit whenever head is complete
-always @(*) commit_ack = commit_valid;
+// Auto-commit: acknowledge whenever head is ready and has not faulted.
+// Since alloc_fault=0 throughout, commit_fault is always 0, so this
+// simplifies to commit_valid — identical to the original behaviour.
+always @(*) commit_ack = commit_valid && !commit_fault;
 
 initial begin
     $dumpfile("sim/waves/rob_tb.vcd");
@@ -109,6 +126,10 @@ initial begin
         errors = errors + 1;
     end else
         $display("  PASS: head committed in order, data=%h", commit_data);
+    if (commit_fault) begin
+        $display("  FAIL: commit_fault unexpectedly asserted");
+        errors = errors + 1;
+    end
     @(posedge clk); #1;
     // Next head is entry 1 (already complete) - should commit immediately
     if (!commit_valid || commit_data !== 32'hBEEF) begin

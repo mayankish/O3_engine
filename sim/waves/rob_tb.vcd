@@ -1,5 +1,5 @@
 $date
-	Sun Jun 21 14:26:34 2026
+	Sun Jul 19 00:05:52 2026
 $end
 $version
 	Icarus Verilog
@@ -10,16 +10,16 @@ $end
 $scope module tb_reorder_buffer $end
 $var wire 1 ! rob_full $end
 $var wire 1 " rob_empty $end
-$var wire 1 # commit_valid $end
-$var wire 2 $ commit_tag [1:0] $end
-$var wire 5 % commit_rd [4:0] $end
-$var wire 32 & commit_data [31:0] $end
-$var wire 2 ' alloc_tag [1:0] $end
-$var parameter 32 ( AW $end
-$var parameter 32 ) CLK $end
-$var parameter 32 * DEPTH $end
-$var parameter 32 + DW $end
-$var parameter 32 , TW $end
+$var wire 32 # lk2_data [31:0] $end
+$var wire 1 $ lk2_complete $end
+$var wire 32 % lk1_data [31:0] $end
+$var wire 1 & lk1_complete $end
+$var wire 1 ' commit_valid $end
+$var wire 2 ( commit_tag [1:0] $end
+$var wire 5 ) commit_rd [4:0] $end
+$var wire 1 * commit_fault $end
+$var wire 32 + commit_data [31:0] $end
+$var wire 2 , alloc_tag [1:0] $end
 $var reg 3 - alloc_opcode [2:0] $end
 $var reg 5 . alloc_rd [4:0] $end
 $var reg 1 / alloc_valid $end
@@ -32,28 +32,31 @@ $var reg 1 5 flush $end
 $var reg 1 6 rst_n $end
 $var integer 32 7 errors [31:0] $end
 $scope module dut $end
-$var wire 3 8 alloc_opcode [2:0] $end
-$var wire 5 9 alloc_rd [4:0] $end
-$var wire 2 : alloc_tag [1:0] $end
+$var wire 1 8 alloc_fault $end
+$var wire 3 9 alloc_opcode [2:0] $end
+$var wire 5 : alloc_rd [4:0] $end
+$var wire 2 ; alloc_tag [1:0] $end
 $var wire 1 / alloc_valid $end
 $var wire 1 0 clk $end
 $var wire 1 1 commit_ack $end
-$var wire 32 ; commit_data [31:0] $end
-$var wire 5 < commit_rd [4:0] $end
-$var wire 2 = commit_tag [1:0] $end
-$var wire 1 # commit_valid $end
-$var wire 32 > complete_data [31:0] $end
-$var wire 2 ? complete_tag [1:0] $end
+$var wire 32 < commit_data [31:0] $end
+$var wire 1 * commit_fault $end
+$var wire 5 = commit_rd [4:0] $end
+$var wire 2 > commit_tag [1:0] $end
+$var wire 1 ' commit_valid $end
+$var wire 32 ? complete_data [31:0] $end
+$var wire 2 @ complete_tag [1:0] $end
 $var wire 1 4 complete_valid $end
 $var wire 1 5 flush $end
+$var wire 1 & lk1_complete $end
+$var wire 32 A lk1_data [31:0] $end
+$var wire 2 B lk1_tag [1:0] $end
+$var wire 1 $ lk2_complete $end
+$var wire 32 C lk2_data [31:0] $end
+$var wire 2 D lk2_tag [1:0] $end
 $var wire 1 ! rob_full $end
 $var wire 1 6 rst_n $end
 $var wire 1 " rob_empty $end
-$var parameter 32 @ AW $end
-$var parameter 32 A DEPTH $end
-$var parameter 32 B DW $end
-$var parameter 32 C OW $end
-$var parameter 32 D TW $end
 $var reg 2 E rob_head [1:0] $end
 $var reg 2 F rob_tail [1:0] $end
 $var integer 32 G r [31:0] $end
@@ -65,19 +68,6 @@ $var integer 32 J ok [31:0] $end
 $upscope $end
 $upscope $end
 $enddefinitions $end
-$comment Show the parameter values. $end
-$dumpall
-b10 D
-b11 C
-b100000 B
-b100 A
-b101 @
-b10 ,
-b100000 +
-b100 *
-b1010 )
-b101 (
-$end
 #0
 $dumpvars
 bx J
@@ -86,14 +76,19 @@ bx H
 bx G
 bx F
 bx E
+b0 D
+bx C
+b0 B
+bx A
+b0 @
 b0 ?
-b0 >
+bx >
 bx =
 bx <
 bx ;
-bx :
+b0 :
 b0 9
-b0 8
+08
 b0 7
 06
 05
@@ -105,28 +100,40 @@ x1
 0/
 b0 .
 b0 -
-bx '
-bx &
+bx ,
+bx +
+x*
+bx )
+bx (
+x'
+x&
 bx %
-bx $
-x#
+x$
+bx #
 x"
 x!
 $end
 #5000
 01
-0#
-b0 &
-b0 ;
-b0 %
+0'
+b0 +
 b0 <
+b0 %
+b0 A
+b0 #
+b0 C
+b0 )
+b0 =
+0*
+0&
+0$
 0!
 1"
-b0 '
-b0 :
+b0 ,
+b0 ;
 b0 F
-b0 $
-b0 =
+b0 (
+b0 >
 b0 E
 b100 G
 10
@@ -148,48 +155,48 @@ b100 G
 10
 #36000
 b1 .
-b1 9
+b1 :
 1/
 #40000
 00
 #45000
-b1 '
-b1 :
+b1 ,
+b1 ;
 b1 F
-b1 %
-b1 <
+b1 )
+b1 =
 0!
 0"
 10
 #50000
 00
 #55000
-b10 '
-b10 :
+b10 ,
+b10 ;
 b10 F
 0!
 10
 #60000
 00
 #65000
-b11 '
-b11 :
+b11 ,
+b11 ;
 b11 F
 0!
 10
 #70000
 00
 #75000
-b0 '
-b0 :
+b0 ,
+b0 ;
 b0 F
 1!
 10
 #76000
 b1011111011101111 2
-b1011111011101111 >
+b1011111011101111 ?
 b1 3
-b1 ?
+b1 @
 14
 0/
 #80000
@@ -204,28 +211,36 @@ b1 ?
 10
 #96000
 b1101111010101101 2
-b1101111010101101 >
+b1101111010101101 ?
 b0 3
-b0 ?
+b0 @
 14
 #100000
 00
 #105000
 11
-1#
-b1101111010101101 &
-b1101111010101101 ;
+1'
+1&
+1$
+b1101111010101101 +
+b1101111010101101 <
+b1101111010101101 %
+b1101111010101101 A
+b1101111010101101 #
+b1101111010101101 C
 10
 #106000
 04
 #110000
 00
 #115000
-b1011111011101111 &
-b1011111011101111 ;
-b1 $
-b1 =
+b1011111011101111 +
+b1011111011101111 <
+b1 (
+b1 >
 b1 E
+0&
+0$
 0!
 0"
 10
@@ -233,21 +248,27 @@ b1 E
 00
 #125000
 01
-0#
-b0 &
-b0 ;
-b10 $
-b10 =
+0'
+b0 +
+b0 <
+b10 (
+b10 >
 b10 E
 0"
 10
 #126000
 b1100101011111110 2
-b1100101011111110 >
+b1100101011111110 ?
 14
 #130000
 00
 #135000
+1&
+1$
+b1100101011111110 %
+b1100101011111110 A
+b1100101011111110 #
+b1100101011111110 C
 10
 #136000
 04
@@ -269,23 +290,29 @@ b1100101011111110 >
 10
 #166000
 b10 .
-b10 9
+b10 :
 1/
 b0 I
 b1 J
 #170000
 00
 #175000
-b1 '
-b1 :
+b1 ,
+b1 ;
 b1 F
+b0 %
+b0 A
+b0 #
+b0 C
+0&
+0$
 0!
 10
 #176000
 b1000000000000 2
-b1000000000000 >
+b1000000000000 ?
 b1 3
-b1 ?
+b1 @
 14
 b1 H
 0/
@@ -300,14 +327,14 @@ b1 I
 #190000
 00
 #195000
-b10 '
-b10 :
+b10 ,
+b10 ;
 b10 F
 1!
 10
 #196000
 b1000000000001 2
-b1000000000001 >
+b1000000000001 ?
 14
 b10 H
 0/
@@ -325,7 +352,7 @@ b10 I
 10
 #216000
 b1000000000010 2
-b1000000000010 >
+b1000000000010 ?
 14
 0/
 #220000
@@ -342,7 +369,7 @@ b11 I
 10
 #236000
 b1000000000011 2
-b1000000000011 >
+b1000000000011 ?
 14
 0/
 #240000
@@ -359,7 +386,7 @@ b100 I
 10
 #256000
 b1000000000100 2
-b1000000000100 >
+b1000000000100 ?
 14
 0/
 #260000
@@ -376,7 +403,7 @@ b101 I
 10
 #276000
 b1000000000101 2
-b1000000000101 >
+b1000000000101 ?
 14
 0/
 #280000
@@ -393,7 +420,7 @@ b110 I
 10
 #296000
 b1000000000110 2
-b1000000000110 >
+b1000000000110 ?
 14
 0/
 #300000
@@ -410,7 +437,7 @@ b111 I
 10
 #316000
 b1000000000111 2
-b1000000000111 >
+b1000000000111 ?
 14
 0/
 #320000
@@ -419,7 +446,7 @@ b1000000000111 >
 10
 #326000
 b11 .
-b11 9
+b11 :
 1/
 b1000 I
 04
@@ -435,13 +462,13 @@ b1000 I
 #345000
 0!
 1"
-b0 '
-b0 :
+b0 ,
+b0 ;
 b0 F
-b10 %
-b10 <
-b0 $
-b0 =
+b10 )
+b10 =
+b0 (
+b0 >
 b0 E
 b100 G
 10

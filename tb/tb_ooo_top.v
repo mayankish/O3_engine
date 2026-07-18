@@ -9,6 +9,9 @@
 //             4) ROB backpressure + recovery
 //             5) Random regression via instrs.txt + golden check
 //             6) Flush mid-flight
+// Updated   : Added commit_fault wire to connect new Fix #3 output port.
+//             commit_fault should never assert in these tests (alloc_fault
+//             is hardwired to 0 in ooo_top).
 // ============================================================
 
 module tb_ooo_top;
@@ -30,6 +33,7 @@ wire       commit_valid;
 wire [AW-1:0] commit_rd;
 wire [DW-1:0] commit_data;
 wire [TW-1:0] commit_tag;
+wire          commit_fault;   // [Fix #3] new output — monitored, should stay 0
 wire          rs_full_w, rob_full_w, pipeline_busy;
 
 ooo_top #(.RS_DEPTH(`RS_DEPTH), .ROB_DEPTH(`ROB_DEPTH)) dut (
@@ -37,6 +41,7 @@ ooo_top #(.RS_DEPTH(`RS_DEPTH), .ROB_DEPTH(`ROB_DEPTH)) dut (
     .instr_valid(instr_valid), .instr(instr), .instr_ready(instr_ready),
     .commit_valid(commit_valid), .commit_rd(commit_rd),
     .commit_data(commit_data), .commit_tag(commit_tag),
+    .commit_fault(commit_fault),  // [Fix #3] connected
     .rs_full(rs_full_w), .rob_full(rob_full_w),
     .pipeline_busy(pipeline_busy)
 );
@@ -54,6 +59,13 @@ always @(posedge clk) begin
     end else if (commit_valid && commit_rd != {AW{1'b0}}) begin
         shadow_rf[commit_rd] <= commit_data;
         total_commits        = total_commits + 1;
+    end
+end
+
+// ---- commit_fault watchdog — unexpected fault is a test error -----
+always @(posedge clk) begin
+    if (rst_n && commit_fault) begin
+        $display("  WATCHDOG FAIL: commit_fault asserted unexpectedly at t=%0t", $time);
     end
 end
 

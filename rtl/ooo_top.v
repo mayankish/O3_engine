@@ -5,6 +5,26 @@
 // Description : Top-level out-of-order execution engine integrating the RAT,
 //               RS, ROB, ALU, and CDB.  Implements single-issue dispatch with
 //               stall on RS-full or ROB-full.  In-order commit via ROB head.
+//
+// Fix #1 — RAT deadlock:
+//   ROB now exposes two combinational tag-lookup ports (lk1/lk2).  These are
+//   wired to the RAT so it can see whether a source register's current rename
+//   tag is already complete in the ROB, even after the CDB broadcast cycle has
+//   passed but before commit fires.
+//
+// Fix #2 — multi-FU CDB interface:
+//   CDB now has fu1_* ports and a round-robin arbiter (fu1 tied to 0 here;
+//   LSU plugs in later).  fu0_grant feeds back into the ALU's cdb_req_grant
+//   input and drives fu_ready to the RS — the RS won't issue another
+//   instruction if the ALU's output stage is backed up waiting for the bus.
+//
+// Fix #3 — ROB fault bit / conditional commit_ack:
+//   commit_ack is no longer an unconditional pass-through of commit_valid.
+//   If the ROB head faulted (commit_fault=1), commit_ack stays low, stalling
+//   the ROB head until an external flush clears the pipeline.  A new top-level
+//   output commit_fault lets the surrounding CPU core trigger the trap handler.
+//   alloc_fault is hardwired to 0 until a fault source exists.
+//
 // Parameters  : RS_DEPTH=8, ROB_DEPTH=16, NUM_REGS=32, DATA_WIDTH=32
 // ============================================================
 
@@ -32,6 +52,7 @@ module ooo_top #(
     output wire [AW-1:0]  commit_rd,    // Architectural register being written
     output wire [DW-1:0]  commit_data,  // Committed value
     output wire [TW-1:0]  commit_tag,   // ROB tag being retired
+    output wire           commit_fault, // [Fix #3] Head instruction faulted
 
     // Status
     output wire           rs_full,      // RS backpressure indicator
@@ -40,14 +61,12 @@ module ooo_top #(
 );
 
 // ---- Instruction decode --------------------------------------------
-// Encoding: [31:27]=rd  [26:22]=rs1  [21:17]=rs2  [16:14]=opcode  [13:0]=imm
 wire [AW-1:0]  dec_rd     = instr[`RD_HI  :`RD_LO ];
 wire [AW-1:0]  dec_rs1    = instr[`RS1_HI :`RS1_LO];
 wire [AW-1:0]  dec_rs2    = instr[`RS2_HI :`RS2_LO];
 wire [2:0]     dec_opcode = instr[`OP_HI  :`OP_LO ];
 
 // ---- Dispatch enable -----------------------------------------------
-// Single-cycle dispatch when instruction available and engine not stalled
 wire dispatch_en = instr_valid && !rs_full && !rob_full;
 assign instr_ready = !rs_full && !rob_full;
 
@@ -69,14 +88,21 @@ wire         commit_valid_i;
 wire [AW-1:0] commit_rd_i;
 wire [DW-1:0] commit_data_i;
 wire [TW-1:0] commit_tag_i;
+wire          commit_fault_i; // [Fix #3]
 
-// Auto-acknowledge every commit (RAT always accepts)
-wire commit_ack = commit_valid_i;
+// [Fix #3] Only auto-ack a non-faulting commit.
+// A faulting head stalls here until an external flush resolves it.
+wire commit_ack = commit_valid_i && !commit_fault_i;
 
 assign commit_valid = commit_valid_i;
 assign commit_rd    = commit_rd_i;
 assign commit_data  = commit_data_i;
 assign commit_tag   = commit_tag_i;
+assign commit_fault = commit_fault_i;
+
+// ---- [Fix #1] ROB tag-lookup wires for RAT readiness ---------------
+wire         rob_lk1_complete, rob_lk2_complete;
+wire [DW-1:0] rob_lk1_data,    rob_lk2_data;
 
 // ---- ALU issue wires -----------------------------------------------
 wire         issue_valid_w;
@@ -88,6 +114,14 @@ wire [TW-1:0] issue_tag_w;
 wire         cdb_req_valid;
 wire [TW-1:0] cdb_req_tag;
 wire [DW-1:0] cdb_req_data;
+
+// ---- [Fix #2] CDB arbiter grant for fu0 (the ALU) ------------------
+wire fu0_grant_w;
+
+// fu_ready: RS should not issue if the ALU output stage is stalled.
+// With NUM_FU=1: fu0_grant = cdb_req_valid always, so this is always 1
+// (identical to the original 1'b1 tie).
+wire alu_fu_ready = !cdb_req_valid || fu0_grant_w;
 
 // ---- Status --------------------------------------------------------
 wire rs_empty;
@@ -102,31 +136,36 @@ assign pipeline_busy = !rs_empty || !rob_empty_w;
 register_alias_table #(
     .DW(DW), .TW(TW), .AW(AW), .NR(NR)
 ) u_rat (
-    .clk          (clk),
-    .rst_n        (rst_n),
-    .flush        (flush),
+    .clk              (clk),
+    .rst_n            (rst_n),
+    .flush            (flush),
     // Dispatch read
-    .rs1_addr     (dec_rs1),
-    .rs2_addr     (dec_rs2),
-    .rs1_ready    (rat_rs1_ready),
-    .rs1_data     (rat_rs1_data),
-    .rs1_tag      (rat_rs1_tag),
-    .rs2_ready    (rat_rs2_ready),
-    .rs2_data     (rat_rs2_data),
-    .rs2_tag      (rat_rs2_tag),
+    .rs1_addr         (dec_rs1),
+    .rs2_addr         (dec_rs2),
+    .rs1_ready        (rat_rs1_ready),
+    .rs1_data         (rat_rs1_data),
+    .rs1_tag          (rat_rs1_tag),
+    .rs2_ready        (rat_rs2_ready),
+    .rs2_data         (rat_rs2_data),
+    .rs2_tag          (rat_rs2_tag),
     // Rename
-    .rename_valid (dispatch_en),
-    .rename_rd    (dec_rd),
-    .rename_tag   (alloc_tag),
+    .rename_valid     (dispatch_en),
+    .rename_rd        (dec_rd),
+    .rename_tag       (alloc_tag),
     // Commit
-    .commit_valid (commit_valid_i),
-    .commit_rd    (commit_rd_i),
-    .commit_data  (commit_data_i),
-    .commit_tag   (commit_tag_i),
+    .commit_valid     (commit_valid_i),
+    .commit_rd        (commit_rd_i),
+    .commit_data      (commit_data_i),
+    .commit_tag       (commit_tag_i),
     // CDB snoop
-    .cdb_valid    (cdb_valid),
-    .cdb_tag      (cdb_tag),
-    .cdb_data     (cdb_data)
+    .cdb_valid        (cdb_valid),
+    .cdb_tag          (cdb_tag),
+    .cdb_data         (cdb_data),
+    // [Fix #1] ROB lookup for post-CDB, pre-commit readiness
+    .rob_rs1_complete (rob_lk1_complete),
+    .rob_rs1_data     (rob_lk1_data),
+    .rob_rs2_complete (rob_lk2_complete),
+    .rob_rs2_data     (rob_lk2_data)
 );
 
 // ---- Reservation Station ------------------------------------------
@@ -149,8 +188,8 @@ reservation_station #(
     .dispatch_s2_data (rat_rs2_data),
     .dispatch_s2_tag  (rat_rs2_tag),
     .dispatch_dest_tag(alloc_tag),
-    // Issue
-    .fu_ready         (1'b1),         // Single ALU always ready after clearing
+    // Issue: [Fix #2] fu_ready now tracks ALU backpressure
+    .fu_ready         (alu_fu_ready),
     .issue_valid      (issue_valid_w),
     .issue_opcode     (issue_opcode_w),
     .issue_src1       (issue_src1_w),
@@ -176,6 +215,7 @@ reorder_buffer #(
     .alloc_valid    (dispatch_en),
     .alloc_rd       (dec_rd),
     .alloc_opcode   (dec_opcode),
+    .alloc_fault    (1'b0),         // [Fix #3] No fault source yet; LSU/branch will drive
     .alloc_tag      (alloc_tag),
     .rob_full       (rob_full),
     // Completion from CDB
@@ -187,34 +227,53 @@ reorder_buffer #(
     .commit_rd      (commit_rd_i),
     .commit_data    (commit_data_i),
     .commit_tag     (commit_tag_i),
+    .commit_fault   (commit_fault_i), // [Fix #3]
     .commit_ack     (commit_ack),
-    .rob_empty      (rob_empty_w)
+    .rob_empty      (rob_empty_w),
+    // [Fix #1] Tag-lookup ports for RAT readiness
+    .lk1_tag        (rat_rs1_tag),
+    .lk1_complete   (rob_lk1_complete),
+    .lk1_data       (rob_lk1_data),
+    .lk2_tag        (rat_rs2_tag),
+    .lk2_complete   (rob_lk2_complete),
+    .lk2_data       (rob_lk2_data)
 );
 
 // ---- Integer ALU --------------------------------------------------
 integer_alu #(
     .DW(DW), .TW(TW)
 ) u_alu (
-    .clk          (clk),
-    .rst_n        (rst_n),
-    .flush        (flush),
-    .issue_valid  (issue_valid_w),
-    .issue_opcode (issue_opcode_w),
-    .issue_src1   (issue_src1_w),
-    .issue_src2   (issue_src2_w),
-    .issue_tag    (issue_tag_w),
-    .cdb_req_valid(cdb_req_valid),
-    .cdb_req_tag  (cdb_req_tag),
-    .cdb_req_data (cdb_req_data)
+    .clk           (clk),
+    .rst_n         (rst_n),
+    .flush         (flush),
+    .issue_valid   (issue_valid_w),
+    .issue_opcode  (issue_opcode_w),
+    .issue_src1    (issue_src1_w),
+    .issue_src2    (issue_src2_w),
+    .issue_tag     (issue_tag_w),
+    .cdb_req_valid (cdb_req_valid),
+    .cdb_req_tag   (cdb_req_tag),
+    .cdb_req_data  (cdb_req_data),
+    .cdb_req_grant (fu0_grant_w)    // [Fix #2] backpressure from CDB arbiter
 );
 
-// ---- Common Data Bus ---------------------------------------------
+// ---- Common Data Bus ----------------------------------------------
 common_data_bus #(
-    .DW(DW), .TW(TW), .NUM_FU(1)
+    .DW(DW), .TW(TW), .NUM_FU(`NUM_FU)
 ) u_cdb (
+    .clk       (clk),             // [Fix #2] needed for round-robin state
+    .rst_n     (rst_n),
+    // FU-0: integer ALU
     .fu0_valid (cdb_req_valid),
     .fu0_tag   (cdb_req_tag),
     .fu0_data  (cdb_req_data),
+    .fu0_grant (fu0_grant_w),     // [Fix #2] grant feedback to ALU
+    // FU-1: reserved for LSU (tied off until LSU is built)
+    .fu1_valid (1'b0),
+    .fu1_tag   ({TW{1'b0}}),
+    .fu1_data  ({DW{1'b0}}),
+    .fu1_grant (),                // unconnected: LSU will use this
+    // Broadcast
     .cdb_valid (cdb_valid),
     .cdb_tag   (cdb_tag),
     .cdb_data  (cdb_data)
