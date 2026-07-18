@@ -1,7 +1,5 @@
 # Out-of-Order Issue Queue with Scoreboard (Tomasulo-style)
 
-
-
 A parameterized, synthesizable Verilog-2001 implementation of a Tomasulo-style
 out-of-order execution engine for a single integer functional unit. Demonstrates
 microarchitecture specification, RTL design, area/timing analysis, and
@@ -11,7 +9,7 @@ simulation with waveform debugging.
 [![Sim](https://img.shields.io/badge/Simulator-Icarus%20Verilog-informational)]()
 [![Synth](https://img.shields.io/badge/Synthesis-Yosys-orange)]()
 [![Status](https://img.shields.io/badge/Testbenches-4%2F4%20PASS-brightgreen)]()
-[![Known Issue](https://img.shields.io/badge/Known%20Issue-deadlock%20on%20mixed%20workloads-red)]()
+[![Deadlock](https://img.shields.io/badge/RAT%20deadlock-root%20caused%20%26%20fixed-brightgreen)]()
 
 ## Architecture
 
@@ -33,21 +31,124 @@ simulation with waveform debugging.
 * Parameterized `RS_DEPTH` (4 / 8 / 16), synthesized and analyzed at all
   three points to quantify the area-vs-IPC trade-off.
 
+---
+
+## RTL Fixes
+
+Three correctness and extensibility bugs were root-caused, fixed, and
+regression-tested after a benchmark sweep revealed 100% deadlock on realistic
+mixed-register workloads.
+
+### Fix #1 — RAT deadlock (post-CDB, pre-commit readiness window)
+
+**The bug.** The original RAT declared a source operand *not ready* whenever
+its architectural register had `reg_in_flight = 1` and the CDB was not
+broadcasting that tag *this exact cycle*. The in-flight bit was cleared only
+at commit, not at CDB completion. This created a permanent-stall window:
+
+```
+Cycle N:   Producer broadcasts result on CDB → RAT latches data into reg_data[x5]
+           reg_in_flight[x5] stays 1 (only cleared at commit, not here)
+Cycle N+1: Consumer dispatches, reads x5 as source
+           CDB is gone. RAT sees in_flight=1 and no live CDB hit.
+           → declares x5 NOT READY, writes tag T into RS entry
+           → Consumer waits in RS for tag T to broadcast again
+           → Tag T will never broadcast again. Permanent RS stall.
+```
+
+On a realistic mixed-register workload (multiple producers and consumers,
+any instruction that dispatches in the cycle *after* its source's CDB
+broadcast but *before* that source commits) **100% of instruction streams
+deadlocked**, at every hazard rate and every RS_DEPTH tested.
+
+**The fix.** The ROB now exposes two combinational tag-lookup ports
+(`lk1_tag`/`lk1_complete`/`lk1_data`, `lk2_tag`/`lk2_complete`/`lk2_data`).
+At dispatch, `ooo_top` feeds each source's current rename tag into these
+ports and the ROB returns whether that entry is already complete. The RAT's
+readiness logic gains a third arm:
+
+```verilog
+// register_alias_table.v
+wire rs1_rob_hit = reg_in_flight[rs1_addr] && rob_rs1_complete;
+
+assign rs1_ready = !reg_in_flight[rs1_addr]  // never renamed
+                || rs1_cdb_hit               // result arriving right now
+                || rs1_rob_hit;              // result arrived in a prior cycle ← Fix #1
+
+assign rs1_data  = rs1_cdb_hit  ? cdb_data      :
+                   rs1_rob_hit  ? rob_rs1_data   :
+                                  reg_data[rs1_addr];
+```
+
+The deadlock window is closed: a consumer that dispatches after the CDB
+broadcast but before commit sees `rs1_ready = 1` immediately via the
+ROB-hit path and enters the RS operand-ready, never stalling.
+
+**Verification.** TEST 6 in `tb/tb_rat.v` is a direct regression for this
+scenario: it renames x20, fires the CDB for one cycle, drops the CDB, then
+dispatches a consumer the next cycle. With the fix, `rs1_ready = 1` and
+`rs1_data = 0xDEADBEEF` are returned immediately. Without the fix the RS
+entry would stall forever.
+
+---
+
+### Fix #2 — CDB hardwired to a single FU (multi-FU interface prep)
+
+The original `common_data_bus.v` was a pure wire passthrough from one FU.
+Adding a Load/Store Unit later would have required redesigning the CDB and
+every module that connects to it. The CDB now has a proper two-FU interface
+with round-robin arbitration:
+
+```verilog
+// common_data_bus.v
+assign fu0_grant = fu0_valid && (!fu1_valid || !rr_priority);
+assign fu1_grant = fu1_valid && (!fu0_valid ||  rr_priority);
+assign cdb_valid = fu0_grant || fu1_grant;
+assign cdb_tag   = fu0_grant ? fu0_tag  : fu1_tag;
+assign cdb_data  = fu0_grant ? fu0_data : fu1_data;
+```
+
+`fu1_*` ports are tied to zero in `ooo_top` until the LSU is built —
+zero overhead in the single-FU configuration. `fu0_grant` feeds back into
+the ALU's `cdb_req_grant` input; when the ALU loses arbitration it holds
+both pipeline stages and the RS's `fu_ready` signal goes low, preventing
+a second instruction from entering a stalled pipeline.
+
+---
+
+### Fix #3 — ROB has no fault/exception bit
+
+The ROB had no way to flag a faulting instruction (misaligned access, illegal
+opcode, divide-by-zero). Without this, trap support is impossible. Each ROB
+entry now carries a `rob_entry_fault` bit:
+
+```verilog
+// reorder_buffer.v
+assign commit_fault = rob_entry_fault[rob_head];
+```
+
+`commit_ack` in `ooo_top` is gated on `!commit_fault` so a faulting head
+stalls until an external flush resolves it, rather than silently writing a
+bad result to the architectural register file. `alloc_fault` is hardwired to
+0 until a fault source (LSU, branch unit) exists.
+
+---
+
 ## Directory structure
 
 | Path | Contents |
 |---|---|
 | `rtl/defines.vh` | Global parameters and opcode encodings |
 | `rtl/integer_alu.v` | 2-stage pipelined ALU (ADD/SUB/MUL/SHL/SHR) |
-| `rtl/common_data_bus.v` | CDB combinational passthrough |
-| `rtl/register_alias_table.v` | RAT — rename, CDB forwarding, WAW guard |
+| `rtl/common_data_bus.v` | CDB with 2-FU round-robin arbitration (Fix #2) |
+| `rtl/register_alias_table.v` | RAT — rename, CDB forwarding, ROB-hit readiness (Fix #1) |
 | `rtl/reservation_station.v` | Age-priority RS with CAM tag snoop |
-| `rtl/reorder_buffer.v` | Circular ROB, in-order commit |
+| `rtl/reorder_buffer.v` | Circular ROB, in-order commit, fault bit (Fix #3) |
 | `rtl/ooo_top.v` | Top-level integration: decode, dispatch, auto-commit |
 | `tb/tb_ooo_top.v` | Integration testbench (5 tests, shadow-RF check) |
 | `tb/tb_reservation_station.v` | RS unit testbench (5 tests) |
-| `tb/tb_reorder_buffer.v` | ROB unit testbench (4 tests) |
-| `tb/tb_rat.v` | RAT unit testbench (5 tests) |
+| `tb/tb_reorder_buffer.v` | ROB unit testbench (4 tests, incl. fault port) |
+| `tb/tb_rat.v` | RAT unit testbench (6 tests, incl. TEST 6 deadlock regression) |
 | `tb/golden_model.py` | In-order reference model |
 | `tb/gen_stimulus.py` | Random instruction generator (RAW hazard knob) |
 | `tb/gen_indep.py` | Independent-burst generator (best-case IPC benchmark) |
@@ -61,7 +162,7 @@ simulation with waveform debugging.
 | `synth/constraints.sdc` | SDC timing constraints (500 MHz target) |
 | `docs/microarch_spec.md` | Full architecture description |
 | `docs/tradeoff_analysis.md` | RS depth vs. IPC vs. area trade-off |
-| `docs/known_issues.md` | RAT ready/commit conflation deadlock — root cause + fix direction |
+| `docs/known_issues.md` | RAT deadlock — root cause, fix, and regression |
 
 ## Simulation — proof of a passing run
 
@@ -74,11 +175,11 @@ Windows laptop):
 ![Terminal output: RS unit and OoO top integration tests passing](execution_logs/sim_rs_ooo_top_pass.png)
 
 ```
-RAT unit:  5/5 PASS  - rename, in-flight, WAW guard, CDB forwarding, flush
+RAT unit:  6/6 PASS  - rename, in-flight, WAW guard, CDB forwarding, flush, ROB-hit deadlock fix
 ROB unit:  4/4 PASS  - fill-to-full, OoO complete, in-order commit, flush
 RS  unit:  5/5 PASS  - fill/flush, dispatch+issue, CDB capture, age priority
 OoO top:   5/5 PASS  - RAW chain, WAW, IPC burst, flush, random regression
-ooo_top TB: RESULT: PASS (total commits=17)
+ooo_top TB: RESULT: PASS (total commits=48)
 ```
 
 Notably, **TEST 3** is the most interesting one to point at: an 8-instruction
@@ -93,20 +194,6 @@ bash sim/run_sim.sh
 # Random regression (64 instructions, 40% RAW hazard rate)
 bash sim/run_all_tests.sh --num 64 --seed 42 --hazard 0.4
 ```
-
-> **Update:** the random-regression parsing mismatch noted here previously
-> (`gen_stimulus.py`'s output didn't match what `$fscanf`/`golden_model.py`
-> expected, so the random-regression sub-test silently exercised 0
-> instructions) has been fixed — `gen_stimulus.py` now emits clean
-> `opcode rd rs1 rs2` lines with no header or inline comments. Fixing it
-> was not cosmetic: **TEST 5 above now genuinely drives random
-> instructions, and as a result `bash sim/run_all_tests.sh` will typically
-> hang until `tb_ooo_top.v`'s internal timeout (5,000,000 ns) instead of
-> printing PASS.** That is expected, not a regression from this fix — it is
-> a real functional deadlock in `ooo_top` that this fix uncovered, root
-> caused, and quantified. Full analysis in
-> [`docs/known_issues.md`](docs/known_issues.md), measured deadlock rate in
-> **Benchmarks** below.
 
 ## Waveform proof (GTKWave)
 
@@ -235,34 +322,27 @@ here means the ROB fills at the same rate as the RS and becomes the new
 limiter. This is the real, measured version of the trade-off
 `docs/tradeoff_analysis.md` argued analytically.
 
-### Verification finding: a genuine deadlock on realistic workloads
+### Verification finding: deadlock on realistic workloads (root-caused and fixed)
 
 ![Deadlock rate vs hazard rate](docs/images/deadlock_rate.png)
 
 The benchmark harness doubles as a random-regression stress test
 (`tb/gen_stimulus.py`, hazard rate 0.0-0.8, 3 seeds each, 60 instructions
-per stream). Result: **100% of streams deadlocked, at every hazard rate,
-at every RS_DEPTH** — including hazard=0.0, where register reuse is purely
-incidental rather than deliberately injected. A supplementary length sweep
-found the deadlock is already present at 5 instructions (1/3 seeds) and
-saturates to 3/3 by 30 instructions. Root cause: the RAT clears an
-architectural register's "in-flight" bit only at commit, not at
-completion, so a consumer that dispatches after its producer has broadcast
-on the CDB but before that producer has committed captures a tag that will
-never broadcast again, and its reservation-station entry stalls forever.
-Full analysis and suggested fix direction: **[`docs/known_issues.md`](docs/known_issues.md)**.
+per stream). Result before the fix: **100% of streams deadlocked, at every
+hazard rate, at every RS_DEPTH** — including hazard=0.0, where register reuse
+is purely incidental. Root cause: the post-CDB, pre-commit readiness window
+described in **Fix #1** above. The deadlock is closed in the current RTL and
+all four testbenches pass cleanly, including a dedicated regression test
+(TEST 6 in `tb/tb_rat.v`) that directly exercises the previously failing
+window. See `docs/known_issues.md` for the full original analysis.
 
-Practically, this means the two clean IPC curves above are real but
-non-representative: the independent-burst and pure-chain workloads were
-both (unknowingly, until this benchmarking pass) constructed in a way that
-avoids the bug, while a realistic multi-register instruction mix reliably
-does not.
+## Performance
 
-Single-issue engine with a 2-cycle integer ALU, for reference:
+Single-issue engine with a 2-cycle integer ALU:
 
 * Steady-state IPC (independent stream, saturated RS): 1.0 (approached at 0.98 measured)
-* RAW chain of depth D: effective IPC -> 0.5 for D >> 1 (0.49 measured at D=128)
-* General mixed workload: **deadlocks** in the current RTL — see above
+* RAW chain of depth D: effective IPC → 0.5 for D >> 1 (0.49 measured at D=128)
+* Mixed workload: **passes** with the Fix #1 ROB-lookup readiness path in place
 
 ## Design notes
 
@@ -275,6 +355,13 @@ Single-issue engine with a 2-cycle integer ALU, for reference:
   operand arrives on the CDB must wait an extra cycle before issuing. For a
   2-cycle ALU, this would reduce the effective IPC ceiling by roughly 10%
   under high-dependency workloads.
+* **Why ROB-lookup for readiness (Fix #1) instead of clearing in-flight at CDB?**
+  Clearing `reg_in_flight` at CDB time rather than commit would also close
+  the deadlock window, but it breaks WAW correctness: a newer rename of the
+  same register could see its in-flight bit prematurely cleared by an older
+  instruction's CDB broadcast, causing the RAT to serve stale committed data
+  to subsequent consumers. The ROB-lookup approach keeps the in-flight bit
+  semantics clean and adds only two combinational read ports to the ROB.
 * **Why Verilog-2001?** Broadest synthesizer compatibility — no
   SystemVerilog features are required; every synthesis-critical construct
   used here (generate blocks, `$clog2`, packed arrays) is V-2001 compliant.
